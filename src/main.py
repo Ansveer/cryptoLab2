@@ -2,7 +2,6 @@ import sys
 import argparse
 from PIL import Image
 import numpy as np
-from analys import *
 
 
 def change_bit(pixel_value, bit):
