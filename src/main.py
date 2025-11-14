@@ -11,19 +11,18 @@ def change_bit(pixel_value, bit):
 def bytes_to_bits(bytes):
     bits = []
     for byte in bytes:
-        for i in range(7, -1, -1):
-            bits.append((byte >> i) & 1)
+        for i in range(8):
+            bits.append(int(format(byte, '08b')[i]))
     return bits
 
 
 def bits_to_bytes(bits):
     bytes_list = []
     for i in range(0, len(bits), 8):
-        byte = 0
+        byte = ""
         for j in range(8):
-            if i + j < len(bits):
-                byte = (byte << 1) | bits[i + j]
-        bytes_list.append(byte)
+            byte += str(bits[i + j])
+        bytes_list.append(int(byte, 2))
     return bytes(bytes_list)
 
 
@@ -42,8 +41,8 @@ if __name__ == "__main__":
     img = Image.open(f"../imgs/{args._in}")
     width, height = img.size
 
-    need_bits = 8 * len(marker) + 8 * len(message_bytes)
-    if need_bits > width * height * 3:
+    need_bits = len(marker_bits) + 8 * len(message_bytes)
+    if need_bits > width * height * 3 * 8:
         print("Сообщение слишком большое")
         sys.exit(0)
 
@@ -95,6 +94,8 @@ if __name__ == "__main__":
     if not markerFound:
         print("Маркер не найден")
         sys.exit(0)
+
+    print(extractedBits == encode_message)
 
     extractedBits = extractedBits[:-len(marker_bits)]
 
