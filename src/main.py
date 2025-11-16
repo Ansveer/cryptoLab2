@@ -2,6 +2,14 @@ import sys
 import argparse
 from PIL import Image
 import numpy as np
+import string
+import random
+
+
+def generate_random_string(n):
+    """Генерирует случайную строку длиной n из букв"""
+    letters = string.ascii_letters  # Все буквы (a-z, A-Z)
+    return ''.join(random.choice(letters) for _ in range(n))
 
 
 def change_bit(pixel_value, bit):
@@ -35,14 +43,23 @@ if __name__ == "__main__":
 
     marker = 'klqweofd'.encode("UTF-8")
     marker_bits = bytes_to_bits(marker)
-    message = args.text
+    # message = args.text
+    # message_bytes = message.encode('utf-8')
+    message = generate_random_string(98304 - len(marker))
+    # message = generate_random_string(30000 - len(marker))
     message_bytes = message.encode('utf-8')
+    # print(len(message))
+    # print(len(message_bytes))
+    # print(len(message_bytes))
+    # print(len(marker_bits))
 
     img = Image.open(f"../imgs/{args._in}")
     width, height = img.size
 
     need_bits = len(marker_bits) + 8 * len(message_bytes)
-    if need_bits > width * height * 3 * 8:
+    # print(need_bits)
+    # print(width*height*3)
+    if need_bits > width * height * 3:
         print("Сообщение слишком большое")
         sys.exit(0)
 
@@ -95,12 +112,12 @@ if __name__ == "__main__":
         print("Маркер не найден")
         sys.exit(0)
 
-    print(extractedBits == encode_message)
-
     extractedBits = extractedBits[:-len(marker_bits)]
 
     extractedBytes = bits_to_bytes(extractedBits)
 
     messageExtracted = extractedBytes.decode('utf-8')
 
-    print(f"Восстановленный текст - {messageExtracted}")
+    # print(f"Восстановленный текст - {messageExtracted}")
+
+    print(message == messageExtracted)
