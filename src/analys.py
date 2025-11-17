@@ -1,11 +1,63 @@
 import argparse
+import math
+import json
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
+from sklearn.metrics import roc_curve, auc
 from collections import Counter
-from scipy.stats import chi2
+from scipy.integrate import quad
+from main import *
+
+
+def integrand(x, k):
+    return math.exp(-(x/2)) * ( x ** ( (k / 2) - 1 ) )
+
+
+def myChi2(x_2, k):
+    tmp = (1 / ( (2 ** (k / 2)) * math.gamma(k/2) )) * quad(integrand, 0, x_2, args=(k))[0]
+    return tmp
+
+
+def myChi2Function(arr, channels, meta=None, img=None):
+    p_values = []
+    for c in range(channels):
+        degrees_of_freedom = 0
+        x_2 = 0
+        tmp = Counter(arr[:, :, c].flatten())
+        channelHist = [tmp.get(j, 0) for j in range(256)]
+
+        for k in range(0, 128, 1):
+            n_2k = channelHist[2 * k]
+            n_2k1 = channelHist[2 * k + 1]
+
+            e = (n_2k + n_2k1) / 2
+
+            if e > 0:
+                x_2 += (((n_2k - e) ** 2) / e) + (((n_2k1 - e) ** 2) / e)
+                degrees_of_freedom += 1
+
+        p_value = 1 - myChi2(x_2, degrees_of_freedom - 1)
+        p_values.append(p_value)
+
+        if meta:
+            meta2 = {
+                "img": f"{img}",
+                "channel": f"{channel_names[c]}",
+                "x_2": f"{x_2}",
+                "p_value": f"{p_value}",
+            }
+            meta["chi2_test"].append(meta2)
+
+    if meta:
+        with open(f"../results/Chi2_{img}", "w", encoding="utf-8") as file:
+            json.dump(meta, file, indent=3, ensure_ascii=False)
+
+    if not meta:
+        return p_values
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -13,9 +65,9 @@ if __name__ == "__main__":
     parser.add_argument('--stego', required=True)
     args = parser.parse_args()
 
-    cover = Image.open(f"../imgs/{args.cover}").convert("RGB")
+    cover = Image.open(f"../imgs/{args.cover}")
     coverArr = np.array(cover)
-    stego = Image.open(f"../results/{args.stego}").convert("RGB")
+    stego = Image.open(f"../results/{args.stego}")
     stegoArr = np.array(stego)
 
     # ========== Оценка незаметности ==========
@@ -49,7 +101,7 @@ if __name__ == "__main__":
     # fig.savefig(f'../results/DiffMap.png', dpi=300, bbox_inches='tight')
     #
     # # 3. Гистограммы каналов до и после
-    # channel_names = ['Red', 'Green', 'Blue']
+    channel_names = ['Red', 'Green', 'Blue']
     #
     # fig2, axes2 = plt.subplots(2, 3, figsize=(15, 8))
     #
@@ -66,59 +118,113 @@ if __name__ == "__main__":
 
     # ========== Проверка обнаружимости ==========
 
-    tmp = Counter(stegoArr.flatten())
-    histChannels = [tmp.get(i, 0) for i in range(256)]
-    # print(histChannels)
+    arr = coverArr
+    width, height, channels = arr.shape
+    meta = {
+        "chi2_test": []
+    }
 
-    x_2 = 0
-    degrees_of_freedom = 0
+    myChi2Function(arr, channels, meta, "cover")
 
-    for i in range(0, 128, 2):
-        n_2k = histChannels[i]
-        n_2k1 = histChannels[i + 1]
+    arr = stegoArr
+    width, height, channels = arr.shape
+    meta = {
+        "chi2_test": []
+    }
 
-        e = np.maximum((n_2k + n_2k1) / 2, 0.5)
+    myChi2Function(arr, channels, meta, "stego")
 
-        if e > 0:
-            x_2 += (((n_2k - e) ** 2) / e) + (((n_2k1 - e) ** 2) / e)
-            degrees_of_freedom += 1
+    # ========== Payload ==========
 
-    x_2 = x_2 / degrees_of_freedom
-    p = 1 - chi2.cdf(x_2, degrees_of_freedom)
+    payloads = [0.1, 0.5, 1, 5, 50, 60, 70, 80]
+    capacity_bits = width * height * 3
+    marker = 'klqweofd'.encode("UTF-8")
+    marker_bits = bytes_to_bits(marker)
 
-    # x_22 = 0
-    # degrees_of_freedom2 = 0
+    all_scores = []
+    all_labels = []
 
-    for i in range(3):
-        p_all_value = 0
-        x_21 = 0
-        degrees = 0
-        tmp2 = Counter(stegoArr[:, :, i].flatten())
-        arrChannel = [tmp2.get(j, 0) for j in range(256)]
-        print(np.sum(arrChannel))
+    i = 0
+    for p in payloads:
+        pixels = np.array(cover)
+        width, height, channels = pixels.shape
 
-        for j in range(0, 128, 2):
-            n_2k = arrChannel[j]
-            n_2k1 = arrChannel[j + 1]
+        message_bits = (( (p / 100) * capacity_bits ) // 8) * 8 - len(marker_bits)
+        # print("p - ", p)
+        # print("message_bits - ", message_bits)
+        message = generate_random_string(int(message_bits) // 8)
+        message_bytes = message.encode('utf-8')
 
-            e = np.maximum((n_2k + n_2k1) / 2, 0.5)
+        encode_message = bytes_to_bits(message_bytes) + marker_bits
+        # print(len(encode_message))
 
-            if e > 0:
-                x_21 += (((n_2k - e) ** 2) / e) + (((n_2k1 - e) ** 2) / e)
-                degrees += 1
+        i = 0
+        endEmbed = False
+        for y in range(height):
+            for x in range(width):
+                for channel in range(channels):
+                    if i >= len(encode_message):
+                        endEmbed = True
+                        break
+                    old_pixel = pixels[x][y][channel]
+                    new_pixel = change_bit(old_pixel, encode_message[i])
+                    pixels[x][y][channel] = new_pixel
+                    i += 1
+                if endEmbed:
+                    break
+            if endEmbed:
+                break
 
-            # p_all_value += 1 - chi2.cdf(x_21)
-        x_21 = x_21 / degrees
-        p2 = 1 - chi2.cdf(x_21, degrees - 1)
-        print("x_21 - ", x_21)
-        print("p2_value - ", p2)
+        result_img = Image.fromarray(pixels)
 
-    # p2 = 1 - chi2.cdf(x_22, degrees_of_freedom2*8)
-    print("x_2 - ", x_2)
-    print("p_value - ", p)
-    # print("x_22 - ", x_22)
-    # print("p2_value - ", p2)
-    # print(degrees_of_freedom)
-    # print(degrees_of_freedom2)
+        arr = coverArr
+        width, height, channels = arr.shape
 
-    # plt.show()
+        p_values_cover = myChi2Function(arr, channels)
+        all_scores.append(np.mean(p_values_cover))
+        all_labels.append(1)
+
+        arr = np.array(result_img)
+        width, height, channels = arr.shape
+
+        p_values_stego = myChi2Function(arr, channels)
+        # tmp = []
+        # for i in p_values_stego:
+        #     if i > 0.5:
+        #         tmp.append(1)
+        #     else:
+        #         tmp.append(0)
+        all_scores.append(int(np.mean(p_values_stego)))
+        # all_scores.append(p_values_stego)
+        all_labels.append(0)
+
+    fig3 = plt.figure(figsize=(10, 8))
+    for i, payload in enumerate(payloads):
+        scores = all_scores[i]
+        labels = all_labels[i]
+
+        # print(scores)
+        # print(labels)
+
+        fpr, tpr, thresholds = roc_curve(labels, scores)
+        # print(fpr, tpr, thresholds)
+        roc_auc = auc(fpr, tpr)
+
+        plt.plot(fpr, tpr, lw=2, label=f'Payload {payload}% (AUC = {roc_auc:.4f})')
+
+    # print(all_scores)
+    # print(all_labels)
+    # fpr, tpr, thresholds = roc_curve(all_labels, all_scores)
+    # roc_auc = auc(fpr, tpr)
+    # plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC (AUC = {roc_auc:.4f})')
+    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--', label='Случайный детектор (AUC = 0.5)')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate (FPR)')
+    plt.ylabel('True Positive Rate (TPR)')
+    plt.title('ROC-кривые для детектора Хи-квадрат (LSB)')
+    plt.legend(loc="lower right")
+    plt.grid(True)
+    fig3.savefig(f'../results/Payloads.png', dpi=300, bbox_inches='tight')
+
+    plt.show()

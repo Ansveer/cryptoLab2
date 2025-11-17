@@ -5,6 +5,7 @@ import numpy as np
 import string
 import random
 
+# np.arr (512, 512, 3) [строка][столбец][канал]
 
 def generate_random_string(n):
     """Генерирует случайную строку длиной n из букв"""
@@ -45,8 +46,8 @@ if __name__ == "__main__":
     marker_bits = bytes_to_bits(marker)
     # message = args.text
     # message_bytes = message.encode('utf-8')
-    message = generate_random_string(98304 - len(marker))
-    # message = generate_random_string(30000 - len(marker))
+    message = generate_random_string(8847 - len(marker))
+    # message = generate_random_string(59930 - len(marker))
     message_bytes = message.encode('utf-8')
     # print(len(message))
     # print(len(message_bytes))
@@ -54,7 +55,8 @@ if __name__ == "__main__":
     # print(len(marker_bits))
 
     img = Image.open(f"../imgs/{args._in}")
-    width, height = img.size
+    pixels = np.array(img)
+    width, height, channels = pixels.shape
 
     need_bits = len(marker_bits) + 8 * len(message_bytes)
     # print(need_bits)
@@ -63,15 +65,15 @@ if __name__ == "__main__":
         print("Сообщение слишком большое")
         sys.exit(0)
 
-    pixels = np.array(img)
     encode_message = bytes_to_bits(message_bytes) + marker_bits
+    print(len(encode_message) - len(marker_bits))
 
     # Встраивание сообщения в изображение
     i = 0
     endEmbed = False
     for y in range(height):
         for x in range(width):
-            for channel in range(3):
+            for channel in range(channels):
                 if i >= len(encode_message):
                     endEmbed = True
                     break
@@ -87,6 +89,8 @@ if __name__ == "__main__":
     result_img = Image.fromarray(pixels)
     result_img.save(f"../results/{args.out}")
 
+    result_img = Image.open(f"../results/{args.out}")
+
     pixels2 = np.array(result_img)
 
     # Достаём сообщение
@@ -94,7 +98,7 @@ if __name__ == "__main__":
     extractedBits = []
     for y in range(height):
         for x in range(width):
-            for channel in range(3):
+            for channel in range(channels):
                 bit = pixels2[x][y][channel] & 1
                 extractedBits.append(bit)
 
